@@ -10,7 +10,10 @@ dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let ai: GoogleGenAI | null = null;
+if (process.env.GEMINI_API_KEY) {
+  ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+}
 
 const io = new Server(httpServer, {
   cors: {
@@ -80,7 +83,7 @@ io.on("connection", (socket) => {
       room.status = "playing";
       const wordsList = room.language === "pt-BR" ? WORDS_PT : WORDS_EN;
       room.secretWord = wordsList[Math.floor(Math.random() * wordsList.length)];
-      
+
       // Reset players
       Object.values(room.players).forEach(p => {
         p.score = 0;
@@ -101,9 +104,15 @@ io.on("connection", (socket) => {
 
     try {
       const langPrompt = room.language === "pt-BR" ? "Portuguese" : "English";
-      
+
       if (room.secretWord.toLowerCase() === guess.toLowerCase()) {
         evaluateAndApplyGuess(roomId, socket.id, guess, 100);
+        return;
+      }
+
+      if (!ai) {
+        console.error("Gemini API Key is missing. Cannot evaluate guess.");
+        evaluateAndApplyGuess(roomId, socket.id, guess, 0);
         return;
       }
 
@@ -114,7 +123,7 @@ io.on("connection", (socket) => {
       const scoreStr = response.text?.trim() || "0";
       const score = parseInt(scoreStr, 10);
       const finalScore = isNaN(score) ? 0 : Math.min(100, Math.max(0, score));
-      
+
       evaluateAndApplyGuess(roomId, socket.id, guess, finalScore);
     } catch (error) {
       console.error("Evaluation error:", error);
@@ -128,10 +137,10 @@ io.on("connection", (socket) => {
 
     const player = room.players[playerId];
     if (!player) return;
-    
+
     player.guesses.push({ word: guess, similarity });
     player.guesses.sort((a, b) => b.similarity - a.similarity);
-    
+
     // Award points based on similarity
     if (similarity === 100) {
       player.score += 1000;
